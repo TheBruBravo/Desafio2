@@ -1,0 +1,102 @@
+pipeline {
+    agent any
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        disableConcurrentBuilds()
+    }
+
+    triggers {
+        cron('0 9,13,17 * * 1-5') // Lunes a viernes a las 9, 13 y 17
+    }
+
+    environment {
+        DOCKERHUB_CREDENTIALS = 'dockerhub_credentials'
+        REPOSITORY_NAME = 'https://github.com/TheBruBravo/Desafio1.git'
+        BRANCH_NAME = 'main'
+    }
+
+    stages {
+        stage('Git Clone') {
+            steps {
+                git branch: "${BRANCH_NAME}", url: "${REPOSITORY_NAME}"
+            }
+        }
+        stage('Build Docker Image') {
+            steps {
+                script {
+                    dir('Desafio1') {
+                        sh "docker-compose build"
+                    }
+                }
+            }
+        }
+        stage('Run Docker Compose') {
+            steps {
+                script {
+                    dir('Desafio1') {
+                        sh "docker-compose up -d"
+                    }
+                }
+            }
+        }
+        stage('Run Tests') {
+            steps {
+                script {
+                    sleep 10 // Esperar a que los servicios se inicien
+                    def responseCode = ""
+                    responseCode = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://prometheus:9090/targets", returnStdout: true).trim()
+                    if (responseCode == "200") {
+                        println "Prometheus service is running correctly"
+                    } else {
+                        error "Prometheus service is not running correctly, received HTTP status code: ${responseCode}"
+                    }
+                    responseCode = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://grafana:3000/api/health", returnStdout: true).trim()
+                    if (responseCode == "200") {
+                        println "Grafana service is running correctly"
+                    } else {
+                        error "Grafana service is not running correctly, received HTTP status code: ${responseCode}"
+                    }
+                    responseCode = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://cadvisor:8080/api/v1.0/containers", returnStdout: true).trim()
+                    if (responseCode == "200") {
+                        println "cAdvisor service is running correctly"
+                    } else {
+                        error "cAdvisor service is not running correctly, received HTTP status code: ${responseCode}"
+                    }
+                    responseCode = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://node_exporter:9100/metrics", returnStdout: true).trim()
+                    if (responseCode == "200") {
+                        println "Node Exporter service is running correctly"
+                    } else {
+                        error "Node Exporter service is not running correctly, received HTTP status code: ${httprequest}"
+                    }
+                }
+            }
+        }
+        stage('Push Docker Image') {
+            steps {
+                script {
+                    dir('Desafio1') {
+                        withCredentials([usernamePassword(credentialsId: DOCKERHUB_CREDENTIALS, passwordVariable: 'DOCKERHUB_PASSWORD', usernameVariable: 'DOCKERHUB_USERNAME')]) {
+                            sh "docker tag ${DOCKERHUB_USERNAME}/prometheus-custom:v1.0.0 ${DOCKERHUB_USERNAME}/prometheus-custom:v1.0.0-${BUILD_NUMBER}"
+                            sh "docker tag ${DOCKERHUB_USERNAME}/grafana-custom:v1.0.0 ${DOCKERHUB_USERNAME}/grafana-custom:v1.0.0-${BUILD_NUMBER}"
+                            sh "docker login -u ${DOCKERHUB_USERNAME} -p ${DOCKERHUB_PASSWORD}"
+                            sh "docker push ${DOCKERHUB_USERNAME}/prometheus-custom:v1.0.0-${BUILD_NUMBER}"
+                            sh "docker push ${DOCKERHUB_USERNAME}/grafana-custom:v1.0.0-${BUILD_NUMBER}"
+                        }
+                    }
+                }
+            }
+        }
+    }
+    post {
+        always {
+            script {
+                dir('Desafio1') {
+                    sh "docker-compose down --remove-orphans"
+                }
+                sh "docker system prune -a -f --volumes"
+                cleanWs()
+            }
+        }
+    }
+}
