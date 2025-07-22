@@ -63,7 +63,7 @@ pipeline {
                     } else {
                         error "cAdvisor service is not running correctly, received HTTP status code: ${responseCode}"
                     }
-                    responseCode = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://node_exporter:9100/metrics", returnStdout: true).trim()
+                    responseCode = sh(script: "curl -s -o /dev/null -w '%{http_code}' http://node-exporter:9100/metrics", returnStdout: true).trim()
                     if (responseCode == "200") {
                         println "Node Exporter service is running correctly"
                     } else {
